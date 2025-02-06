@@ -25,7 +25,7 @@ api_key_input_container = st.empty() # Create an empty container to conditionall
 
 if not st.session_state.api_key: # If API key is not in session state, show the input
     with api_key_input_container.container(): # Use the container to group elements if needed
-        api_key = st.text_input("Enter your Google Gemini API Key for this session:", type="password", placeholder="sk-...", help="This API key will only be used for the current session and will not be saved.")
+        api_key = st.text_input("Enter your Google Gemini API Key for this session:", type="default", placeholder="sk-...", help="This API key will only be used for the current session and will not be saved.")
         if api_key:
             st.session_state.api_key = api_key # Store in session state
             api_key_input_container.empty() # Clear the input container after API key is entered
@@ -194,7 +194,7 @@ if st.session_state.api_key:
 
             # Stream the response from Gemini
 
-            for chunk in st.session_state.chat.send_message(f"generate a QUERY or QUERIES for the user prompt:\n{prompt}", stream = True):
+            for chunk in st.session_state.chat.send_message(f"generate a QUERY or QUERIES for the user prompt (remember the use of <query></query>):\n{prompt}", stream = True):
                 queries_response += chunk.text
                 feedback_container.markdown(queries_response, unsafe_allow_html=True)
 
@@ -222,7 +222,7 @@ if st.session_state.api_key:
 
 
             # Stream the response from Gemini
-            for chunk in st.session_state.chat.send_message(f"These are the results to the queries:\n{result_to_prompt}\nUse them to generate an ANSWER.", stream=True):
+            for chunk in st.session_state.chat.send_message(f"These are the results to the queries:\n{result_to_prompt}\nUse them to generate an ANSWER (Remember to include the <paper>TITLE</paper> tags for each answer).", stream=True):
                 full_response += chunk.text
                 response_container.markdown(full_response, unsafe_allow_html=True)  # Update the container with new text
 
