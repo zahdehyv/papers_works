@@ -72,11 +72,16 @@ if st.session_state.api_key:
         result: arxiv.Result = find_nearest_key_levenshtein_lib(st.session_state.results, paper_content, 5)
         if not result:
             return "\n[NOT FOUND]\n"
+        
+        # print(result.journal_ref)
+        
         authors = ", ".join([author.name for author in result.authors])
+        categories = ", ".join([category for category in result.categories])
         transformed_content = f"""
 <div style="border: 1px solid #e6e9ef; border-radius: 5px; padding: 10px; margin-bottom: 10px;">
-    <h4><a href="{result.pdf_url}" target="_blank">{result.title}</a></h4>
+    <h4><a href="{result.links[0].href}" target="_blank">{result.title}</a> <a href="{result.pdf_url}" target="_blank">[PDF]</a></h4>
     <p><b>Authors:</b> {authors}</p>
+    <p><b>Categories:</b> {categories}</p>{f"\n   <p><b>Journal Reference:</b> {result.journal_ref}</p>" if result.journal_ref else ""}
     <p><b>Date:</b> {result.published}</p>
     <p>{result.summary}</p>
     </div>"""
@@ -116,36 +121,57 @@ if st.session_state.api_key:
         st.session_state.model = genai.GenerativeModel(
             model_name="gemini-2.0-flash-lite-preview-02-05",
             system_instruction="""You are a query creator, reviewer, and answer generator model, you can create arxiv queries using the basic syntax
-    Here are some prefixes to indicate the queried field:
-    - ti -> Title
-    - au -> Author
-    - abs -> Abstract
-    - co -> Comment
-    - jr -> Journal Reference
-    - cat -> Subject Category
-    - rn -> Report Number
-    - id -> Id (use id_list instead)
-    - all -> All of the above
+Here are some prefixes to indicate the queried field:
+- ti -> Title
+- au -> Author
+- abs -> Abstract
+- co -> Comment
+- jr -> Journal Reference
+- cat -> Subject Category
+- rn -> Report Number
+- id -> Id (use id_list instead)
+- all -> All of the above
 
-    some logical operations:
-    - AND
-    - OR
-    - ANDNOT
-    The ANDNOT Boolean operator is particularly useful, as it allows us to filter search results based on certain fields. For example, if we wanted all of the articles by the author Adrian DelMaestro with titles that did not contain the word checkerboard, we could construct the following query:
+some logical operations:
+- AND
+- OR
+- ANDNOT
+The ANDNOT Boolean operator is particularly useful, as it allows us to filter search results based on certain fields. For example, if we wanted all of the articles by the author Adrian DelMaestro with titles that did not contain the word checkerboard, we could construct the following query:
 
-    <query>au:del_maestro ANDNOT ti:checkerboard</query>
+<query>au:del_maestro ANDNOT ti:checkerboard</query>
 
-    and agrupation terms like:
-    - ( )Used to group Boolean expressions for Boolean operator precedence.
-    - double quotes	Used to group multiple words into phrases to search a particular field.
-    - space	Used to extend a search_query to include multiple fields.
+and agrupation terms like:
+- ( )Used to group Boolean expressions for Boolean operator precedence.
+- double quotes	Used to group multiple words into phrases to search a particular field.
+- space	Used to extend a search_query to include multiple fields.
 
-    example: <query>ti:(reasoning AND llm)</query>
-    always use the <query></query> and provide multiple queries if needed.
+example: <query>ti:(reasoning AND llm)</query>
+always use the <query></query> and provide multiple queries if needed.
 
-    When asked for QUERY you must propose the queries inside <query></query> tags.
-    When asked for an ANSWER, you must select from the papers the most relevant ones and provide an answer to the user encapsuling the titles of the papers in <paper>TITLE</paper> tags, and then you must provide a little explanation on why it is relevant. You must also provide a table at the end, offering a brief summary and key insights
-    Consider that the <paper></paper> tags will be replaced by a CARD, so do not put it as a continuation of any other fragment or in a list (eg. starting with '-')""",
+When asked for QUERY you must propose the queries inside <query></query> tags.
+When asked for an ANSWER, you must state a criteria for selecting the papers, then select from the papers the most relevant ones and provide an answer to the user encapsulating the titles of the papers in <paper>TITLE</paper> tags.
+Consider that the <paper></paper> tags will be replaced by a CARD, so put it as an independent line, only containing the tags and title.
+For example:
+<paper>TITLE</paper>
+I would like the final answer to have the following structure:
+1. Think step by step to state the selection criteria for the most relevant papers (consider if it has a journal reference and it is relevant).
+2. Use that criteria and introduce, evaluating the fit to the criteria, the most relevant papers, one by one:
+For example:
+I selected the following papers because [explanation]
+
+<paper>TITLE</paper>
+
+<paper>TITLE</paper>
+
+(continue...)
+
+I also considered those relevant because [explanation]
+
+<paper>TITLE</paper>
+
+<paper>TITLE</paper>
+
+""",
             generation_config=st.session_state.generation_config,
         )
 
@@ -189,21 +215,22 @@ if st.session_state.api_key:
         with st.chat_message("assistant"):
             feedback_container = st.empty()  # Create an empty container for streaming
             # feedback_container.markdown()  # Initial feedback message
-            queries_response = "### Generating queries:\n"
+            queries_response = ""
 
 
             # Stream the response from Gemini
 
-            for chunk in st.session_state.chat.send_message(f"generate a QUERY or QUERIES for the user prompt (remember the use of <query></query>):\n{prompt}", stream = True):
+            for chunk in st.session_state.chat.send_message(f"generate a QUERY or QUERIES for the user prompt (remember the use of <query></query>):\n'{prompt}'\n\n (If the user only asks for clarification you can just use the responses from the previous queries)", stream = True):
                 queries_response += chunk.text
-                feedback_container.markdown(queries_response, unsafe_allow_html=True)
+                feedback_container.markdown(queries_response)
 
+            found = 0
             queries = re.findall(query_pattern, queries_response)
-            result_to_prompt = "RESULTS:\n"
+            result_to_prompt = "### RESULTS:\n"
             qur_cnt = []
             for query in queries:
                 qur_cnt.append(st.empty())
-                qur_cnt[-1].markdown("#### processing query: '"+query+"'", unsafe_allow_html=True)
+                qur_cnt[-1].markdown("#### Processing query: $"+query+"")
                 search = arxiv.Search(
                     query=query,
                     max_results=10,
@@ -211,19 +238,28 @@ if st.session_state.api_key:
                 )
                 results = st.session_state.client.results(search)
                 for result in results:
+                    found += 1
                     qur_cnt.append(st.empty())
-                    qur_cnt[-1].markdown("adding document: '"+result.title+"'", unsafe_allow_html=True)
+                    qur_cnt[-1].markdown("Added document: '"+result.title+"'")
                     st.session_state.results[result.title] = result
-                    result_to_prompt+=f"""- {result.title}: {result.summary}
-    """
+                    result_to_prompt+=f"""- ####'{result.title}':
+##### Abstract: {result.summary}{f"\n##### Journal Reference: {result.journal_ref}" if result.journal_ref else ""}
+"""
 
             response_container = st.empty()  # Create an empty container for streaming
             full_response = ""
 
-
+            if found>0:
+                prompt = f"These are the results to the queries:\n{result_to_prompt}\nUse them to generate an ANSWER (Remember to include the <paper>TITLE</paper> tags for each answer, and state them in isolated lines (as they will be converted to cards with the info))."
+            else:
+                prompt = "The user probably only asked for clarification, check for it. (Remember to include the <paper>TITLE</paper> tags for each answer)."
             # Stream the response from Gemini
-            for chunk in st.session_state.chat.send_message(f"These are the results to the queries:\n{result_to_prompt}\nUse them to generate an ANSWER (Remember to include the <paper>TITLE</paper> tags for each answer).", stream=True):
+            chunkn = 0
+            for chunk in st.session_state.chat.send_message(prompt, stream=True):
+                chunkn+=1
                 full_response += chunk.text
+                if chunkn%100==0:
+                    full_response = re.sub(paper_pattern, replace_paper_content, full_response)
                 response_container.markdown(full_response, unsafe_allow_html=True)  # Update the container with new text
 
             full_response = re.sub(paper_pattern, replace_paper_content, full_response)
