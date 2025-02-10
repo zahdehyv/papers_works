@@ -3,6 +3,7 @@ import google.generativeai as genai
 import arxiv
 import Levenshtein
 import re
+import time
 
 query_pattern = r"<query>(.*?)</query>"
 paper_pattern = r"<paper>(.*?)</paper>"
@@ -10,7 +11,7 @@ paper_pattern = r"<paper>(.*?)</paper>"
 st.set_page_config(
     page_title="Paper-e  🔍",
     page_icon="📖",
-    layout="centered"
+    layout="wide"
     )
 
 if "results" not in st.session_state:
@@ -214,7 +215,7 @@ I also considered those relevant because [explanation]
         # Generate and stream response
         with st.chat_message("assistant"):
             feedback_container = st.empty()  # Create an empty container for streaming
-            # feedback_container.markdown()  # Initial feedback message
+            feedback_container.markdown("Sending request...")  # Initial feedback message
             queries_response = ""
 
 
@@ -223,29 +224,35 @@ I also considered those relevant because [explanation]
             for chunk in st.session_state.chat.send_message(f"generate a QUERY or QUERIES for the user prompt (remember the use of <query></query>):\n'{prompt}'\n\n (If the user only asks for clarification you can just use the responses from the previous queries)", stream = True):
                 queries_response += chunk.text
                 feedback_container.markdown(queries_response)
-
+            
+            feedback_container.empty()
+            
             found = 0
             queries = re.findall(query_pattern, queries_response)
             result_to_prompt = "### RESULTS:\n"
             qur_cnt = []
             for query in queries:
+                qur_cnt = []
                 qur_cnt.append(st.empty())
-                qur_cnt[-1].markdown("#### Processing query: $"+query+"")
+                qur_cnt[-1].markdown("Processing query: $"+query+"")
                 search = arxiv.Search(
                     query=query,
-                    max_results=10,
+                    max_results=100,
                     sort_by=arxiv.SortCriterion.Relevance
                 )
                 results = st.session_state.client.results(search)
+                qur_cnt.append(st.empty())
                 for result in results:
                     found += 1
-                    qur_cnt.append(st.empty())
-                    qur_cnt[-1].markdown("Added document: '"+result.title+"'")
+                    # time.sleep(0.07)
+                    qur_cnt[-1].markdown("- Added document: '"+result.title+"'")
                     st.session_state.results[result.title] = result
                     result_to_prompt+=f"""- ####'{result.title}':
 ##### Abstract: {result.summary}{f"\n##### Journal Reference: {result.journal_ref}" if result.journal_ref else ""}
 """
-
+            qur_cnt = []
+            feedback_container.empty()
+            feedback_container.markdown("Waiting for answer")
             response_container = st.empty()  # Create an empty container for streaming
             full_response = ""
 
