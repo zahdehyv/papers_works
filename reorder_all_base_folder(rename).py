@@ -144,8 +144,8 @@ After all the considerations, the model mainly falls in Consciousness category
 
 def slugify_filename(title):
     """Sanitize title to be a valid filename."""
-    title = title.strip().replace(" ", "_")
-    title = re.sub(r'[^\w.-]', '', title) # Remove special characters except word chars, dots, and hyphens
+    title = title.strip()
+    title = re.sub(r'[^\w\s.-]', '', title)  # Remove special characters except word chars, spaces, dots, and hyphens
     return title
 
 def process_pdfs(input_folder, output_base):
